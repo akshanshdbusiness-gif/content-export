@@ -1,0 +1,452 @@
+# Sitecore Content Export Tool
+
+A standalone Next.js 15 app for exporting page content and component data from **Sitecore XM Cloud** to structured **XML**. Browse the content tree, select pages, and download a clean XML file containing all page fields and component field values — resolved via the XM Cloud Edge layout API.
+
+---
+
+## What it does
+
+- **Content tree browser** — navigate `/sitecore/content` and tick the pages to export
+- **Edge layout API crawl** — for each selected page, calls `{host}/sitecore/api/graph/edge` with your API key; the response contains all page fields and every component's datasource fields already resolved
+- **Auto site detection** — extracts the XM Cloud site name from the Sitecore content path (segment before `/Home`) — no manual input needed
+- **Structured XML output** — hierarchical document: `<Page>` → `<Fields>` + `<Presentation>` → `<Placeholder>` → `<Component>` → nested field elements
+- **Component field nesting** — JSON object fields (images, links, card lists) are rendered as proper nested XML elements, not escaped strings
+- **Header/footer skip** — checkbox to exclude shared `headless-header`, `headless-footer`, `sxa-header`, `sxa-footer` placeholders
+- **Credentials modal** — paste `SITECORE_ENVIRONMENTS` JSON or add environments one at a time at runtime (session-only)
+- **Optional Auth0 SSO** — integrate with Sitecore Cloud login; disable entirely with `DISABLE_AUTH=true` for local/internal use
+
+---
+
+## XML output structure
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<SitecoreExport version="1.0" exportedAt="2026-08-02T..." environment="Dev" language="en"
+                totalPages="1" totalComponents="12">
+  <Pages count="1">
+    <Page itemPath="/sitecore/content/org/site/Home/about"
+          name="about" displayName="about" language="en">
+      <Fields count="8">
+        <Field name="pageTitle">About Acme</Field>
+        <Field name="metaDescription">We are a global materials company.</Field>
+        <Field name="ogImage">
+          <src>https://cdn.example.com/image.jpg</src>
+          <alt>About image</alt>
+          <width>1200</width>
+          <height>630</height>
+        </Field>
+      </Fields>
+      <Presentation componentCount="4">
+        <Placeholder key="headless-main" componentCount="4">
+          <Component index="0" type="CardGrid"
+                     uid="e32417ec-..." datasourcePath="...">
+            <Params>
+              <GridParameters>col-12</GridParameters>
+              <FieldNames>TextOnHover</FieldNames>
+            </Params>
+            <Fields count="5">
+              <Field name="sectionTitle">Brands</Field>
+              <Field name="cardList">
+                <item>
+                  <id>29C99ECD...</id>
+                  <title>Aurora™</title>
+                  <image>
+                    <src>https://cdn.example.com/aurora.jpg</src>
+                    <alt>Aurora</alt>
+                  </image>
+                  <cta>
+                    <href>https://www.example.com/aurora</href>
+                    <text>Learn More</text>
+                  </cta>
+                </item>
+              </Field>
+            </Fields>
+          </Component>
+        </Placeholder>
+      </Presentation>
+    </Page>
+  </Pages>
+</SitecoreExport>
+```
+
+---
+
+## Prerequisites
+
+| Requirement | Version |
+|---|---|
+| Node.js | ≥ 20 |
+| npm | ≥ 10 |
+| XM Cloud environment | with Authoring API access |
+| XM Cloud API key | from GraphQL Playground or Deploy portal |
+
+---
+
+## Local development
+
+```bash
+# 1. Navigate to the app
+cd migration/content-export
+
+# 2. Install dependencies
+npm install
+
+# 3. Set up environment
+cp .env.example .env.local
+# Edit .env.local — minimum required: SITECORE_ENVIRONMENTS + DISABLE_AUTH=true
+
+# 4. Start dev server
+npm run dev
+# → http://localhost:3000
+```
+
+---
+
+## Environment variables
+
+Copy `.env.example` to `.env.local` and fill in the values.
+
+### Minimum setup (no auth, local dev)
+
+```env
+DISABLE_AUTH=true
+NEXT_PUBLIC_DISABLE_AUTH=true
+SITECORE_ENVIRONMENTS=[
+  {
+    "name": "Dev",
+    "host": "https://xmc-org-project-dev.sitecorecloud.io",
+    "clientId": "your_automation_client_id",
+    "clientSecret": "your_automation_client_secret",
+    "contextId": "your_context_id",
+    "apiKey": "your_graphql_api_key"
+  }
+]
+```
+
+### Full reference
+
+| Variable | Required | Description |
+|---|---|---|
+| `SITECORE_ENVIRONMENTS` | **Yes** | JSON array of environment objects — see schema below |
+| `DISABLE_AUTH` | Local dev | `true` to skip all JWT checks |
+| `NEXT_PUBLIC_DISABLE_AUTH` | Local dev | `true` to hide the Auth0 login screen |
+| `SITECORE_ORG_ID` | Auth only | Your `org_...` ID from Sitecore Cloud |
+| `NEXT_PUBLIC_AUTH0_CLIENT_ID` | Auth only | Auth0 application client ID |
+| `NEXT_PUBLIC_AUTH0_DOMAIN` | Auth only | Default: `auth.sitecorecloud.io` |
+| `NEXT_PUBLIC_AUTH0_AUDIENCE` | Auth only | Default: `https://api-webapp.sitecorecloud.io` |
+| `NEXT_PUBLIC_SITECORE_ORG_ID` | Auth only | Same as `SITECORE_ORG_ID` (client-side) |
+
+### `SITECORE_ENVIRONMENTS` schema
+
+```json
+[
+  {
+    "name":         "Dev",
+    "host":         "https://xmc-org-project-dev.sitecorecloud.io",
+    "clientId":     "automation_client_id",
+    "clientSecret": "automation_client_secret",
+    "contextId":    "edge_context_id",
+    "apiKey":       "graphql_api_key"
+  }
+]
+```
+
+| Field | Where to find it |
+|---|---|
+| `host` | XM Cloud Deploy → Environment → Details → CM URL |
+| `clientId` / `clientSecret` | Deploy → Environment → Credentials → Create (Automation scope) |
+| `contextId` | Deploy → Environment → Details → Context ID |
+| `apiKey` | CM host → `/sitecore/api/graph/edge` GraphQL Playground → Settings → API Key |
+
+---
+
+## Production / Opus build
+
+### 1. Build the app
+
+```bash
+cd migration/content-export
+npm install
+npm run build
+```
+
+The optimised Next.js output lands in `.next/`.
+
+### 2. Run in production mode
+
+```bash
+npm run start
+# Listens on PORT env variable (default: 3000)
+```
+
+### 3. Required environment variables for production
+
+Set these in your hosting platform (Opus / Vercel / Azure App Service / etc.):
+
+```
+NODE_ENV=production
+SITECORE_ENVIRONMENTS=[{"name":"Prod","host":"...","clientId":"...","clientSecret":"...","contextId":"...","apiKey":"..."}]
+SITECORE_ORG_ID=org_...
+DISABLE_AUTH=false
+NEXT_PUBLIC_DISABLE_AUTH=false
+NEXT_PUBLIC_AUTH0_CLIENT_ID=...
+NEXT_PUBLIC_AUTH0_DOMAIN=auth.sitecorecloud.io
+NEXT_PUBLIC_AUTH0_AUDIENCE=https://api-webapp.sitecorecloud.io
+NEXT_PUBLIC_AUTH0_SCOPE=openid profile email offline_access
+NEXT_PUBLIC_SITECORE_ORG_ID=org_...
+```
+
+> **Never** set `DISABLE_AUTH=true` in production.
+
+### 4. Docker / container deployment
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+To enable standalone output, add to `next.config.ts`:
+
+```ts
+const nextConfig: NextConfig = {
+  output: "standalone",
+  // ... existing config
+};
+```
+
+### 5. Vercel deployment
+
+```bash
+cd migration/content-export
+npx vercel --prod
+```
+
+Set all environment variables listed in step 3 via the Vercel dashboard or CLI:
+
+```bash
+vercel env add SITECORE_ENVIRONMENTS production
+vercel env add SITECORE_ORG_ID production
+# ... repeat for all required vars
+```
+
+---
+
+## Useful scripts
+
+Run from `migration/content-export/`:
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Start dev server with hot reload |
+| `npm run build` | Create optimised production build |
+| `npm run start` | Run the production build |
+| `npm run type-check` | TypeScript check without emit |
+| `npm run lint` | ESLint across `src/` |
+
+---
+
+## Architecture
+
+```
+migration/content-export/
+├── .env.example            ← copy to .env.local
+├── next.config.ts          ← security headers + frame-ancestors for Sitecore portal
+├── tailwind.config.ts
+└── src/
+    ├── app/
+    │   ├── page.tsx               ← app shell with optional Auth0 gate
+    │   ├── layout.tsx / providers.tsx
+    │   └── api/
+    │       ├── environments/      ← GET  list configured environments
+    │       ├── tree/              ← GET  browse Sitecore content tree
+    │       ├── export/            ← POST crawl pages → download XML
+    │       ├── sites/             ← GET  list XM Cloud site definitions
+    │       └── settings/
+    │           └── credentials/   ← GET/POST runtime credential store
+    ├── components/
+    │   ├── ContentTreeBrowser.tsx ← collapsible tree, layout-aware checkboxes
+    │   ├── EnvironmentSelector.tsx
+    │   ├── ExportPanel.tsx        ← main UI
+    │   └── CredentialsModal.tsx   ← paste env / add single env
+    └── lib/
+        ├── auth/                  ← JWT guard + JWKS verify
+        ├── config.ts              ← environment config + runtime credential store
+        ├── types.ts               ← shared TypeScript types
+        ├── sitecore/
+        │   ├── env-token.ts       ← M2M token cache
+        │   ├── tree.ts            ← Authoring GraphQL tree query
+        │   ├── page-fields.ts     ← Authoring GraphQL item field queries
+        │   ├── page-crawler.ts    ← __Renderings fallback crawler
+        │   └── edge-layout.ts     ← Edge layout API + field flattening
+        └── exporters/
+            └── xml-exporter.ts    ← PageExport[] → XML with nested elements
+```
+
+### Export strategy
+
+```
+Selected Sitecore path
+       │
+       ▼
+siteNameFromPath()  →  "acme-us"   (auto, from segment before /Home)
+sitecorePathToRoute() → "/about"    (/Home heuristic)
+       │
+       ▼
+POST {host}/sitecore/api/graph/edge?sc_apikey=***
+  query GetPageLayout(siteName, routePath, language)
+       │
+       ▼
+rendered.sitecore.route
+  ├── fields        → <Page><Fields>...</Fields></Page>
+  └── placeholders  → <Presentation><Placeholder><Component>...</Component></Placeholder></Presentation>
+       │
+       ▼
+xml-exporter.ts   → nested XML (JSON objects → child elements, HTML → plain text)
+       │
+       ▼
+Content-Disposition: attachment; filename="sitecore-export-2026-08-02.xml"
+```
+
+---
+
+## Relationship to other migration tools
+
+| Tool | Purpose |
+|---|---|
+| `transfer-content` | Transfer / backup / restore items between environments |
+| **`content-export`** | Export page field values + component data to XML for audits, migration mapping, or AEM/other CMS ingestion |
+
+
+## Features
+
+- **Content tree browser** — navigate the Sitecore item hierarchy and tick the pages you want to export
+- **Export scope** — export a single item or an item plus all its descendants
+- **Multi-format output**
+  - **CSV** — flat, spreadsheet-friendly with separate sections for page fields and component fields
+  - **XML** — structured, hierarchical document with `<Page>`, `<Fields>`, and `<Presentation>` sections
+- **Component crawling** — reads each page's `__Renderings` presentation details and fetches the fields of every component datasource
+- **Configurable** — choose language, whether to include system fields, and whether to include component/datasource fields
+- **Auth0 integration** — optional Sitecore Cloud SSO (disable with `DISABLE_AUTH=true` for local use)
+
+## Output structure
+
+### CSV
+
+The CSV file has two sections (separated by a blank row):
+
+| Section | Key columns |
+|---|---|
+| **Page fields** | `ItemPath`, `ItemId`, `TemplateName`, `FieldSection`, `FieldName`, `FieldType`, `FieldValue` |
+| **Component fields** | `PagePath`, `PlaceholderKey`, `ComponentIndex`, `ComponentType`, `DatasourcePath`, `FieldName`, `FieldValue` |
+
+### XML
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<SitecoreExport version="1.0" exportedAt="..." environment="..." language="..." totalPages="1" totalComponents="3">
+  <Pages count="1">
+    <Page itemPath="/sitecore/content/MySite/Home" templateName="App Route" ...>
+      <Fields count="4">
+        <Field name="Title" type="Single-Line Text" section="Data" isSystem="false">Welcome</Field>
+        ...
+      </Fields>
+      <Presentation componentCount="3">
+        <Placeholder key="/main">
+          <Component index="0" type="HeroBanner" datasourcePath="/sitecore/content/.../HeroBannerDatasource" ...>
+            <Fields count="2">
+              <Field name="Heading" type="Single-Line Text" section="Data" isSystem="false">Explore our range</Field>
+              ...
+            </Fields>
+          </Component>
+        </Placeholder>
+      </Presentation>
+    </Page>
+  </Pages>
+</SitecoreExport>
+```
+
+## Getting started
+
+```bash
+cd migration/content-export
+
+# 1. Copy and configure environment variables
+cp .env.example .env.local
+# Edit .env.local with your XM Cloud credentials
+
+# 2. Install dependencies
+npm install
+
+# 3. Start the dev server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `SITECORE_ENVIRONMENTS` | Yes | JSON array of environment configs (see `.env.example`) |
+| `SITECORE_ORG_ID` | Auth only | Your Sitecore Cloud `org_...` ID |
+| `DISABLE_AUTH` | — | Set `true` to skip JWT auth (local dev only) |
+| `NEXT_PUBLIC_AUTH0_CLIENT_ID` | Auth only | Auth0 client ID for user login |
+| `NEXT_PUBLIC_AUTH0_DOMAIN` | Auth only | Auth0 domain (default: `auth.sitecorecloud.io`) |
+| `NEXT_PUBLIC_DISABLE_AUTH` | — | Set `true` to hide the login screen (client side) |
+
+## Architecture
+
+```
+src/
+  app/
+    api/
+      environments/   → GET  /api/environments  — list configured envs
+      tree/           → GET  /api/tree           — browse content tree nodes
+      export/         → POST /api/export         — generate and download file
+    layout.tsx
+    page.tsx
+    providers.tsx     → Auth0 provider wrapper
+  components/
+    ContentTreeBrowser.tsx  — collapsible tree with multi-select
+    EnvironmentSelector.tsx — environment dropdown
+    ExportPanel.tsx         — main UI panel
+  lib/
+    auth/
+      guard.ts        — withOrgAdmin() API route guard
+      verify-user.ts  — JWT verification via JWKS
+    sitecore/
+      env-token.ts    — M2M token cache
+      tree.ts         — content tree GraphQL queries
+      page-fields.ts  — item field GraphQL queries
+      page-crawler.ts — page + component crawler
+    exporters/
+      csv-exporter.ts — PageExport[] → CSV
+      xml-exporter.ts — PageExport[] → XML
+    config.ts         — environment config management
+    types.ts          — shared TypeScript types
+```
+
+## Relationship to other migration tools
+
+| Tool | Purpose |
+|---|---|
+| `transfer-content` | Transfer / backup / restore items between environments |
+| **`content-export`** | Export page data (fields + components) to CSV / XML for analysis, migration mapping, or auditing |
+
+## Notes
+
+- Requires `contextId` in `SITECORE_ENVIRONMENTS` for the content tree browser to work. The context ID is found in XM Cloud Deploy → Environment → Details.
+- Exporting with `ItemAndDescendants` scope on large subtrees may take time. Items are fetched sequentially to avoid overwhelming the API.
+- The `__Renderings` field XML is parsed server-side to extract component placements. If a rendering's datasource cannot be resolved (e.g. the item is deleted), a warning is included in the XML output and skipped in CSV.
